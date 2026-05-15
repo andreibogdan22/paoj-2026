@@ -1,6 +1,5 @@
 package com.pao.laboratory11.exercise1;
 
-// Imports for command parsing and in-memory ranking/lookup structures.
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -12,11 +11,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public class Main {
-    private static final Set<String> HIGH_RISK_COUNTRIES =
-            new HashSet<>(Arrays.asList("RU", "NG", "IR", "KP", "SY"));
-
+    private static final Set<String> HIGH_RISK_COUNTRIES = new HashSet<>(Arrays.asList("RU", "NG", "IR", "KP", "SY"));
     private static final Map<String, Integer> CHANNEL_SCORE = new HashMap<>();
 
     static {
@@ -27,25 +26,25 @@ public class Main {
         CHANNEL_SCORE.put("ATM", 0);
     }
 
-    private static final Comparator<Transaction> BY_RISK_DESC_THEN_ID_ASC =
-            Comparator.comparingInt(Main::riskScore).reversed().thenComparingInt(t -> t.id);
+    private static final Predicate<Transaction> amountOverThreshold = tx -> tx.amount >= 1000.0;
+    private static final Predicate<Transaction> countryInRisk = tx -> HIGH_RISK_COUNTRIES.contains(tx.country);
+    private static final Predicate<Transaction> channelSuspicious = tx -> tx.channel.equals("WEB") || tx.channel.equals("APP") || tx.channel.equals("CRYPTO");
+    private static final Predicate<Transaction> isFlaggedRule = tx -> riskScore(tx) >= 60;
+
+    private static final Comparator<Transaction> BY_RISK_DESC_THEN_ID_ASC = Comparator.comparingInt(Main::riskScore).reversed().thenComparingInt(t -> t.id);
 
     public static void main(String[] args) {
         try {
             run();
         } catch (IOException e) {
-            // Keep deterministic output for checker-based tests.
             System.out.println("ERR IO");
         }
     }
 
     private static void run() throws IOException {
-        // Read dataset and then execute Q commands over the in-memory model.
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         String first = readNonEmptyLine(br);
-        if (first == null) {
-            return;
-        }
+        if (first == null) return;
 
         int n = Integer.parseInt(first);
         Map<Integer, Transaction> byId = new HashMap<>();
@@ -53,14 +52,10 @@ public class Main {
 
         for (int i = 0; i < n; i++) {
             String line = readNonEmptyLine(br);
-            if (line == null) {
-                return;
-            }
+            if (line == null) return;
 
             String[] tok = line.split("\\s+");
-            if (tok.length < 5) {
-                continue;
-            }
+            if (tok.length < 5) continue;
 
             Transaction tx = new Transaction(
                     Integer.parseInt(tok[0]),
@@ -74,16 +69,12 @@ public class Main {
         }
 
         String qLine = readNonEmptyLine(br);
-        if (qLine == null) {
-            return;
-        }
+        if (qLine == null) return;
         int q = Integer.parseInt(qLine);
 
         for (int i = 0; i < q; i++) {
             String cmdLine = readNonEmptyLine(br);
-            if (cmdLine == null) {
-                return;
-            }
+            if (cmdLine == null) return;
 
             String[] cmd = cmdLine.split("\\s+");
             String op = cmd[0].toUpperCase();
@@ -105,20 +96,14 @@ public class Main {
                     break;
 
                 case "LIST_FLAGGED":
-                    // Build flagged view and keep deterministic ordering for tests.
-                    List<Transaction> flagged = new ArrayList<>();
-                    for (Transaction t : all) {
-                        if (isFlagged(t)) {
-                            flagged.add(t);
-                        }
-                    }
-                    flagged.sort(BY_RISK_DESC_THEN_ID_ASC);
+                    List<Transaction> flagged = all.stream()
+                            .filter(isFlaggedRule)
+                            .sorted(BY_RISK_DESC_THEN_ID_ASC)
+                            .collect(Collectors.toList());
                     if (flagged.isEmpty()) {
                         System.out.println("NONE");
                     } else {
-                        for (Transaction t : flagged) {
-                            System.out.println(formatRiskLine(t));
-                        }
+                        flagged.forEach(t -> System.out.println(formatRiskLine(t)));
                     }
                     break;
 
@@ -128,12 +113,10 @@ public class Main {
                         break;
                     }
                     int k = Integer.parseInt(cmd[1]);
-                    List<Transaction> ranked = new ArrayList<>(all);
-                    ranked.sort(BY_RISK_DESC_THEN_ID_ASC);
-                    int limit = Math.max(0, Math.min(k, ranked.size()));
-                    for (int idx = 0; idx < limit; idx++) {
-                        System.out.println(formatRiskLine(ranked.get(idx)));
-                    }
+                    all.stream()
+                            .sorted(BY_RISK_DESC_THEN_ID_ASC)
+                            .limit(k)
+                            .forEach(t -> System.out.println(formatRiskLine(t)));
                     break;
 
                 default:
@@ -146,39 +129,21 @@ public class Main {
     private static String readNonEmptyLine(BufferedReader br) throws IOException {
         String line;
         while ((line = br.readLine()) != null) {
-            if (!line.trim().isEmpty()) {
-                return line.trim();
-            }
+            if (!line.trim().isEmpty()) return line.trim();
         }
         return null;
     }
 
     private static int riskScore(Transaction tx) {
-        // Composite risk scoring used by CHECK, LIST_FLAGGED and TOP_RISK.
         int score = 0;
+        if (tx.amount >= 5000.0) score += 70;
+        else if (tx.amount >= 1000.0) score += 40;
+        else if (tx.amount >= 500.0) score += 20;
 
-        if (tx.amount >= 5000.0) {
-            score += 70;
-        } else if (tx.amount >= 1000.0) {
-            score += 40;
-        } else if (tx.amount >= 500.0) {
-            score += 20;
-        }
-
-        if (tx.amount <= 100.0) {
-            score += 5;
-        }
-
-        if (HIGH_RISK_COUNTRIES.contains(tx.country)) {
-            score += 25;
-        }
-
+        if (tx.amount <= 100.0) score += 5;
+        if (HIGH_RISK_COUNTRIES.contains(tx.country)) score += 25;
         score += CHANNEL_SCORE.getOrDefault(tx.channel, 0);
         return score;
-    }
-
-    private static boolean isFlagged(Transaction tx) {
-        return riskScore(tx) >= 60;
     }
 
     private static String verdict(int score) {
