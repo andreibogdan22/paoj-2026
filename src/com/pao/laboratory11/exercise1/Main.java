@@ -1,132 +1,93 @@
-package com.pao.laboratory11.exercise1;
+package com.pao.laboratory11.exercise2;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class Main {
-    private static final Set<String> HIGH_RISK_COUNTRIES = new HashSet<>(Arrays.asList("RU", "NG", "IR", "KP", "SY"));
-    private static final Map<String, Integer> CHANNEL_SCORE = new HashMap<>();
-
-    static {
-        CHANNEL_SCORE.put("WEB", 15);
-        CHANNEL_SCORE.put("APP", 10);
-        CHANNEL_SCORE.put("CRYPTO", 30);
-        CHANNEL_SCORE.put("POS", 5);
-        CHANNEL_SCORE.put("ATM", 0);
-    }
-
-    private static final Predicate<Transaction> amountOverThreshold = tx -> tx.amount >= 1000.0;
-    private static final Predicate<Transaction> countryInRisk = tx -> HIGH_RISK_COUNTRIES.contains(tx.country);
-    private static final Predicate<Transaction> channelSuspicious = tx -> tx.channel.equals("WEB") || tx.channel.equals("APP") || tx.channel.equals("CRYPTO");
-    private static final Predicate<Transaction> isFlaggedRule = tx -> riskScore(tx) >= 60;
-
-    private static final Comparator<Transaction> BY_RISK_DESC_THEN_ID_ASC = Comparator.comparingInt(Main::riskScore).reversed().thenComparingInt(t -> t.id);
-
     public static void main(String[] args) {
         try {
             run();
         } catch (IOException e) {
-            System.out.println("ERR IO");
         }
     }
 
     private static void run() throws IOException {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        String first = readNonEmptyLine(br);
+
+        String first = nextNonEmpty(br);
         if (first == null) return;
 
         int n = Integer.parseInt(first);
-        Map<Integer, Transaction> byId = new HashMap<>();
-        List<Transaction> all = new ArrayList<>();
-
+        List<Tx> txs = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            String line = readNonEmptyLine(br);
+            String line = nextNonEmpty(br);
             if (line == null) return;
 
-            String[] tok = line.split("\\s+");
-            if (tok.length < 5) continue;
-
-            Transaction tx = new Transaction(
-                    Integer.parseInt(tok[0]),
-                    Double.parseDouble(tok[1]),
-                    tok[2],
-                    tok[3].toUpperCase(),
-                    tok[4].toUpperCase());
-
-            byId.put(tx.id, tx);
-            all.add(tx);
+            String[] p = line.split("\\s+");
+            txs.add(new Tx(
+                    Integer.parseInt(p[0]),
+                    Double.parseDouble(p[1]),
+                    p[2],
+                    p[3],
+                    p[4],
+                    p[5]));
         }
 
-        String qLine = readNonEmptyLine(br);
-        if (qLine == null) return;
-        int q = Integer.parseInt(qLine);
-
+        String qStr = nextNonEmpty(br);
+        if (qStr == null) return;
+        
+        int q = Integer.parseInt(qStr);
         for (int i = 0; i < q; i++) {
-            String cmdLine = readNonEmptyLine(br);
-            if (cmdLine == null) return;
+            String line = nextNonEmpty(br);
+            if (line == null) return;
 
-            String[] cmd = cmdLine.split("\\s+");
-            String op = cmd[0].toUpperCase();
+            String[] p = line.split("\\s+");
+            String op = p[0];
 
             switch (op) {
-                case "CHECK":
-                    if (cmd.length < 2) {
-                        System.out.println("ERR BAD_COMMAND");
-                        break;
-                    }
-                    int id = Integer.parseInt(cmd[1]);
-                    Transaction tx = byId.get(id);
-                    if (tx == null) {
-                        System.out.println("CHECK " + id + " => NOT_FOUND");
-                    } else {
-                        int score = riskScore(tx);
-                        System.out.println("CHECK " + id + " => " + verdict(score) + " score=" + score);
-                    }
+                case "REPORT_MONTH": {
+                    String month = p[1];
+                    double total = txs.stream().filter(tx -> tx.date.startsWith(month)).mapToDouble(tx -> tx.amount).sum();
+                    long count = txs.stream().filter(tx -> tx.date.startsWith(month)).count();
+                    System.out.printf(Locale.US, "MONTH %s total=%.2f count=%d%n", month, total, count);
                     break;
+                }
 
-                case "LIST_FLAGGED":
-                    List<Transaction> flagged = all.stream()
-                            .filter(isFlaggedRule)
-                            .sorted(BY_RISK_DESC_THEN_ID_ASC)
-                            .collect(Collectors.toList());
-                    if (flagged.isEmpty()) {
+                case "REPORT_ACCOUNT": {
+                    String account = p[1];
+                    double total = txs.stream().filter(tx -> tx.account.equals(account)).mapToDouble(tx -> tx.amount).sum();
+                    long count = txs.stream().filter(tx -> tx.account.equals(account)).count();
+                    System.out.printf(Locale.US, "ACCOUNT %s total=%.2f count=%d%n", account, total, count);
+                    break;
+                }
+
+                case "TOP_CHANNELS": {
+                    int k = Integer.parseInt(p[1]);
+                    if (txs.isEmpty()) {
                         System.out.println("NONE");
                     } else {
-                        flagged.forEach(t -> System.out.println(formatRiskLine(t)));
+                        Map<String, Long> counts = txs.stream()
+                                .collect(Collectors.groupingBy(tx -> tx.channel, Collectors.counting()));
+                        counts.entrySet().stream()
+                                .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder())
+                                        .thenComparing(Map.Entry.comparingByKey()))
+                                .limit(k)
+                                .forEach(e -> System.out.println(e.getKey() + " " + e.getValue()));
                     }
                     break;
-
-                case "TOP_RISK":
-                    if (cmd.length < 2) {
-                        System.out.println("ERR BAD_COMMAND");
-                        break;
-                    }
-                    int k = Integer.parseInt(cmd[1]);
-                    all.stream()
-                            .sorted(BY_RISK_DESC_THEN_ID_ASC)
-                            .limit(k)
-                            .forEach(t -> System.out.println(formatRiskLine(t)));
-                    break;
-
-                default:
-                    System.out.println("ERR UNKNOWN_COMMAND");
-                    break;
+                }
             }
         }
     }
 
-    private static String readNonEmptyLine(BufferedReader br) throws IOException {
+    private static String nextNonEmpty(BufferedReader br) throws IOException {
         String line;
         while ((line = br.readLine()) != null) {
             if (!line.trim().isEmpty()) return line.trim();
@@ -134,40 +95,21 @@ public class Main {
         return null;
     }
 
-    private static int riskScore(Transaction tx) {
-        int score = 0;
-        if (tx.amount >= 5000.0) score += 70;
-        else if (tx.amount >= 1000.0) score += 40;
-        else if (tx.amount >= 500.0) score += 20;
-
-        if (tx.amount <= 100.0) score += 5;
-        if (HIGH_RISK_COUNTRIES.contains(tx.country)) score += 25;
-        score += CHANNEL_SCORE.getOrDefault(tx.channel, 0);
-        return score;
-    }
-
-    private static String verdict(int score) {
-        return score >= 60 ? "FLAG" : "ALLOW";
-    }
-
-    private static String formatRiskLine(Transaction tx) {
-        int score = riskScore(tx);
-        return "[" + tx.id + "] " + verdict(score) + " score=" + score;
-    }
-
-    private static class Transaction {
+    private static final class Tx {
         private final int id;
         private final double amount;
         private final String date;
         private final String country;
         private final String channel;
+        private final String account;
 
-        private Transaction(int id, double amount, String date, String country, String channel) {
+        private Tx(int id, double amount, String date, String country, String channel, String account) {
             this.id = id;
             this.amount = amount;
             this.date = date;
             this.country = country;
             this.channel = channel;
+            this.account = account;
         }
     }
 }
